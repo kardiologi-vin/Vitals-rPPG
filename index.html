@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Klinisk rPPG Monitor</title>
+    <title>Vitals rPPG</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #f0f2f5; }
         #container { margin-top: 20px; }
@@ -10,7 +10,7 @@
     </style>
 </head>
 <body>
-    <h1>rPPG Forskningsverktyg</h1>
+    <h1>Vitals rPPG</h1>
     <div id="container">
         <video id="video" autoplay playsinline></video>
         <div id="results">Initialiserar sensor...</div>
@@ -43,7 +43,7 @@
 
             if (gValues.length > 300) { // Ca 10 sekunder data
                 // Enkel frekvensanalys för Puls
-                results.innerText = "Analyserar vågform...";
+                results.innerText = "Analyserar";
                 // Här kan vi addera mer avancerad matematik (FFT) senare
                 if(gValues.length > 600) gValues.shift();
             } else {
