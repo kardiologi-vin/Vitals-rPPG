@@ -1,57 +1,206 @@
 <!DOCTYPE html>
-<html>
+<html lang="sv">
 <head>
-    <title>Vitals rPPG</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klinisk rPPG Monitor</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f0f2f5; }
-        #container { margin-top: 20px; }
-        video { border-radius: 10px; background: #000; width: 80%; max-width: 400px; }
-        #results { font-size: 24px; font-weight: bold; color: #1a73e8; margin-top: 20px; }
+        body { font-family: sans-serif; text-align: center; background: #f4f6f9; margin: 0; padding: 20px; }
+        #container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        video { width: 100%; max-width: 400px; border-radius: 10px; background: #2c3e50; transform: scaleX(-1); } /* Mirror mode default */
+        #results { font-size: 28px; font-weight: bold; color: #2c3e50; margin: 20px 0; min-height: 35px; }
+        #status { font-size: 16px; color: #7f8c8d; margin-bottom: 10px; }
+        button { background: #3498db; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; transition: background 0.2s; margin: 5px; }
+        button:hover { background: #2980b9; }
+        button:disabled { background: #bdc3c7; cursor: not-allowed; }
+        #waveform { width: 100%; height: 100px; margin-top: 15px; background: #ecf0f1; border-radius: 8px; }
     </style>
 </head>
 <body>
-    <h1>Vitals rPPG</h1>
     <div id="container">
+        <h1>rPPG Forskningsverktyg</h1>
+        <div id="status">Väntar på kamera...</div>
         <video id="video" autoplay playsinline></video>
-        <div id="results">Initialiserar sensor...</div>
+        
+        <div id="controls">
+            <button id="flipBtn">Vänd Kamera</button>
+            <button id="startBtn">STARTA MÄTNING</button>
+        </div>
+
+        <div id="results">-- BPM</div>
+        
+        <canvas id="waveform"></canvas>
         <canvas id="output" style="display:none;"></canvas>
     </div>
 
     <script>
         const video = document.getElementById('video');
         const results = document.getElementById('results');
-        const canvas = document.getElementById('output');
-        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        const flipBtn = document.getElementById('flipBtn');
+        const startBtn = document.getElementById('startBtn');
+        const waveCanvas = document.getElementById('waveform');
+        const waveCtx = waveCanvas.getContext('2d');
+        const outCanvas = document.getElementById('output');
+        const outCtx = outCanvas.getContext('2d');
 
+        let currentStream = null;
+        let useFrontCamera = true; // Starta med frontkamera
+        let isMeasuring = false;
         let gValues = [];
+        let timestamps = [];
 
-        // Starta kameran
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
-            .then(stream => { video.srcObject = stream; });
+        // --- KAMERAKONTROLL ---
+        async function startCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                video: {
+                    facingMode: useFrontCamera ? "user" : "environment",
+                    width: { ideal: 640 }, // Balanserad upplösning för prestanda
+                    height: { ideal: 480 },
+                    frameRate: { ideal: 30 }
+                }
+            };
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = currentStream;
+                status.innerText = `Kamera aktiv: ${useFrontCamera ? "Fram" : "Bak"}`;
+                
+                // Spegla videon endast för frontkameran för naturlig känsla
+                video.style.transform = useFrontCamera ? "scaleX(-1)" : "scaleX(1)";
+                
+                waveCanvas.width = waveCanvas.parentElement.offsetWidth - 40;
+                waveCanvas.height = 100;
+                
+            } catch (err) {
+                status.innerText = "Kunde inte aktivera kameran. Kontrollera behörigheter.";
+                console.error(err);
+            }
+        }
+
+        flipBtn.addEventListener('click', () => {
+            useFrontCamera = !useFrontCamera;
+            startCamera();
+            resetMeasurement();
+        });
+
+        // --- RPPG ANALYS OCH VISUALISERING ---
+        function resetMeasurement() {
+            isMeasuring = false;
+            gValues = [];
+            timestamps = [];
+            results.innerText = "-- BPM";
+            results.style.color = "#2c3e50";
+            startBtn.innerText = "STARTA MÄTNING";
+            startBtn.disabled = false;
+        }
+
+        startBtn.addEventListener('click', () => {
+            isMeasuring = true;
+            gValues = [];
+            timestamps = [];
+            startBtn.innerText = "Mäter...";
+            startBtn.disabled = true;
+            results.innerText = "Kalibrerar...";
+        });
+
+        function drawWaveform(value) {
+            waveCtx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);
+            waveCtx.beginPath();
+            waveCtx.strokeStyle = "#e74c3c"; // Röd för pulsvåg
+            waveCtx.lineWidth = 2;
+
+            const displayValues = gValues.slice(-100); // Visa senaste 100 frames
+            if (displayValues.length < 2) return;
+
+            const min = Math.min(...displayValues);
+            const max = Math.max(...displayValues);
+            const range = max - min || 1;
+
+            const xStep = waveCanvas.width / (displayValues.length - 1);
+            
+            for (let i = 0; i < displayValues.length; i++) {
+                const x = i * xStep;
+                // Invertera y-axeln (högre absorption = dipp i kurvan, vilket är standard för rPPG)
+                const y = waveCanvas.height - ((displayValues[i] - min) / range * waveCanvas.height);
+                if (i === 0) waveCtx.moveTo(x, y);
+                else waveCtx.lineTo(x, y);
+            }
+            waveCtx.stroke();
+        }
 
         function processFrame() {
-            if (video.paused || video.ended) return;
+            if (!currentStream || video.paused || video.ended) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
+
+            // 1. Extrahera ROI (Panna/Ansikte)
+            // Vi tar en box i mitten för demo, i fullversion används Face Mesh
+            const roiSize = 50;
+            outCanvas.width = 10; outCanvas.height = 10;
+            outCtx.drawImage(video, video.videoWidth/2 - roiSize/2, video.videoHeight/2 - roiSize/2, roiSize, roiSize, 0, 0, 10, 10);
+            const data = outCtx.getImageData(0, 0, 10, 10).data;
             
-            // Analysera center av bilden (pannan)
-            canvas.width = 10; canvas.height = 10;
-            ctx.drawImage(video, video.videoWidth/2-25, video.videoHeight/4, 50, 50, 0, 0, 10, 10);
-            const data = ctx.getImageData(0, 0, 10, 10).data;
-            
+            // 2. Beräkna medel-G (Grön kanal)
             let greenSum = 0;
             for (let i = 1; i < data.length; i += 4) greenSum += data[i];
-            gValues.push(greenSum / (data.length / 4));
+            const currentG = greenSum / (data.length / 4);
+            
+            gValues.push(currentG);
+            timestamps.push(Date.now());
 
-            if (gValues.length > 300) { // Ca 10 sekunder data
-                // Enkel frekvensanalys för Puls
-                results.innerText = "Analyserar";
-                // Här kan vi addera mer avancerad matematik (FFT) senare
-                if(gValues.length > 600) gValues.shift();
-            } else {
-                results.innerText = `Kalibrerar: ${Math.round(gValues.length/3)}%`;
+            // 3. Visualisera pulsvågen i realtid (alltid aktiv)
+            drawWaveform(currentG);
+
+            // 4. Analyslogik (endast vid mätning)
+            if (isMeasuring) {
+                const duration = (timestamps[timestamps.length-1] - timestamps) / 1000;
+                
+                if (duration < 10) { // Mät i 10 sekunder
+                    results.innerText = `Mäter: ${Math.round(duration/10*100)}%`;
+                    results.style.color = "#7f8c8d";
+                } else {
+                    // Beräkna FPS
+                    const fps = gValues.length / duration;
+                    
+                    // Enkel toppdetektering (kräver egentligen FFT/Bandpass för precision)
+                    let peaks = 0;
+                    const threshold = np.mean(gValues) * 1.001; // Mycket enkel tröskel
+                    
+                    for(let i=1; i<gValues.length-1; i++){
+                        if(gValues[i] > gValues[i-1] && gValues[i] > gValues[i+1] && gValues[i] > threshold){
+                            peaks++;
+                        }
+                    }
+
+                    const hr = (peaks / duration) * 60;
+                    
+                    results.innerText = `${Math.round(hr)} BPM`;
+                    results.style.color = "#27ae60"; // Grön för klar mätning
+                    isMeasuring = false;
+                    startBtn.innerText = "NY MÄTNING";
+                    startBtn.disabled = false;
+                }
+                
+                // Begränsa minnet vid långa mätningar
+                if (gValues.length > 1000) { gValues.shift(); timestamps.shift(); }
+            } else if (gValues.length > 100) {
+                 // Håll grafen vid liv även när vi inte mäter
+                 gValues.shift(); timestamps.shift();
             }
+
             requestAnimationFrame(processFrame);
         }
-        video.addEventListener('play', processFrame);
+
+        // Starta allt
+        startCamera();
+        video.addEventListener('loadedmetadata', processFrame);
+
     </script>
 </body>
 </html>
