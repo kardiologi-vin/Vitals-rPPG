@@ -18,13 +18,13 @@
 </head>
 <body>
     <div id="container">
-        <h1>rPPG Forskningsverktyg</h1>
+        <h1>Vitals-rPPG</h1>
         <div id="status">Väntar på kamera...</div>
         <video id="video" autoplay playsinline></video>
         
         <div id="controls">
             <button id="flipBtn">Vänd Kamera</button>
-            <button id="startBtn">STARTA MÄTNING</button>
+            <button id="startBtn">STARTA</button>
         </div>
 
         <div id="results">-- BPM</div>
@@ -95,7 +95,7 @@
             timestamps = [];
             results.innerText = "-- BPM";
             results.style.color = "#2c3e50";
-            startBtn.innerText = "STARTA MÄTNING";
+            startBtn.innerText = "STARTA";
             startBtn.disabled = false;
         }
 
